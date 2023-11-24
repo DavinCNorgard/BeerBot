@@ -9,10 +9,12 @@
 #include <SPI.h>
 
 // Control modes
-const int TANK_MODE_MANUAL = 1;
-const int TANK_MODE_AUTO = 2;
+const int BEGINNER = 1;
+const int TANK_MODE = 2;
 const int GAME_MODE = 3;
-int CURRENT_MODE = 3;
+const int RESET_MODE = 0;
+int MAX_POWER = 100;
+int CURRENT_MODE = 0;
 
 // control constants
 int THRESHOLD = 8;
@@ -28,10 +30,10 @@ int L_EN_1 = 4;  // connect Digital/PWM pin 4 to L_EN on the BTS7960
 int R_EN_1 = 2;  // connect Digital/PWM pin 2 to R_EN on the BTS7960
 
 //Right Motor (2)
-int RPWM_2 = 6;  // Digital/PWM pin 3 to the RPWM on the BTS7960
-int LPWM_2 = 9;  // Digital/PWM pin 5 to the LPWM on the BTS7960
-int L_EN_2 = A0;  // connect Digital/PWM pin 4 to L_EN on the BTS7960
-int R_EN_2 = 7;  // connect Digital/PWM pin 2 to R_EN on the BTS7960
+int RPWM_2 = 6;  // Digital/PWM pin 6 to the RPWM on the BTS7960
+int LPWM_2 = 9;  // Digital/PWM pin 9 to the LPWM on the BTS7960
+int L_EN_2 = A0;  // connect Digital/PWM pin A0 to L_EN on the BTS7960
+int R_EN_2 = 7;  // connect Digital/PWM pin 7 to R_EN on the BTS7960
 
 // motorController functions
 
@@ -40,7 +42,6 @@ void killMotors() {
   analogWrite(RPWM_1, 0); 
   analogWrite(LPWM_2, 0); 
   analogWrite(RPWM_2, 0); 
-  
 }
 
 
@@ -73,15 +74,15 @@ void setup() {
   Serial.print(F("\r\nPS4 Bluetooth Library Started"));  
 
   // set the pin modes to output
-  pinMode(2, OUTPUT);
-  pinMode(3, OUTPUT);
-  pinMode(4, OUTPUT);
-  pinMode(5, OUTPUT);
+  pinMode(R_EN_1, OUTPUT);
+  pinMode(RPWM_1, OUTPUT);
+  pinMode(L_EN_1, OUTPUT);
+  pinMode(LPWM_1, OUTPUT);
 
-  pinMode(6, OUTPUT);
-  pinMode(9, OUTPUT);
-  pinMode(A0, OUTPUT);
-  pinMode(7, OUTPUT);
+  pinMode(RPWM_2, OUTPUT);
+  pinMode(LPWM_2, OUTPUT);
+  pinMode(L_EN_2, OUTPUT);
+  pinMode(R_EN_2, OUTPUT);
 
   //make sure these pins are set to 0, this prevents motor movement startup
   killMotors();
@@ -95,131 +96,125 @@ void setup() {
 
 // helper functions
 double normalizeJoystick(int input) {
-  double value = ((127.5 - input)/127.5)*100;
-    if(value < 0){
-    return -1*value;
-  }else{
-    return value;
-  }
+  double value = ((127.5 - input)/127.5)*MAX_POWER;
+  return value;
 }
 
 double exponential(double input) {
-  if(input < 0){
-    return -input*input/100;
-  }else{
-    return input*input/100;
-  }
-  
+  return input*input/MAX_POWER;
 }
 
+//0-1920
+void setMaxPower(double touchPadValue){
+
+  int power_level;
+  
+  //Define power levels:
+  if(touchPadValue < 400){
+    power_level = 100;
+  }else if(touchPadValue >= 400 && touchPadValue < 800){
+    power_level = 130;
+  }else if(touchPadValue >= 800 && touchPadValue < 1200){
+    power_level = 170;
+  }else if(touchPadValue >= 1200 && touchPadValue < 1600){
+    power_level = 215;
+  }else if(touchPadValue >= 1600){
+    power_level = 255;
+  }else{
+    power_level = 100;
+  }
+
+  MAX_POWER = power_level;
+}
 
 void loop() {
   Usb.Task();
 
   if (PS4.connected()) {
 
+    //Determine game mode
     if(PS4.getButtonClick(LEFT)) {
       PS4.setLed(Red);
-      CURRENT_MODE = TANK_MODE_MANUAL;      
+      CURRENT_MODE = TANK_MODE;      
     }
     if(PS4.getButtonClick(UP)) {
       PS4.setLed(Yellow);
-      CURRENT_MODE = TANK_MODE_AUTO;      
+      CURRENT_MODE = BEGINNER;      
     }
     if(PS4.getButtonClick(RIGHT)) {
       PS4.setLed(Green);
       CURRENT_MODE = GAME_MODE;      
     }
+    //Reset controls, kill motors, disable motor control
     if(PS4.getButtonClick(DOWN)) {
-      Serial.print("\n Down");
+      Serial.print("\n Resetting");
+      CURRENT_MODE = RESET_MODE;     
+      MAX_POWER = 100;
+      PS4.setLed(Blue);
       killMotors();
-      delay(300);
     }
 
-    // Serial.print(F("\n"));
-    // Serial.print(CURRENT_MODE);
+    if (PS4.isTouching(0) || PS4.isTouching(1)) // Print newline and carriage return if any of the fingers are touching the touchpad
+      Serial.print(F("\r\n"));
+    for (uint8_t i = 0; i < 1; i++) { // The touchpad track one finger
+      if (PS4.isTouching(i)) { // Print the position of the finger if it is touching the touchpad
+        Serial.print(F("X")); Serial.print(i + 1); Serial.print(F(": "));
+        Serial.print(PS4.getX(i));
+        if(PS4.getButtonClick(SQUARE)){
+          //set the max power
+          setMaxPower(PS4.getX(i));  
+        }
+      }
+    }
 
     switch(CURRENT_MODE) {
-      case TANK_MODE_MANUAL:
-
-        // if(PS4.getButtonClick(R1)){
-        //   Serial.print(F("\n shift right\n"));
-        //   RIGHT_GEAR = !RIGHT_GEAR;
-        //   if(RIGHT_GEAR){
-        //     RIGHT_SHIFT1.write(120);
-        //     RIGHT_SHIFT2.write(120);
-        //   }else{
-        //     RIGHT_SHIFT1.write(90);
-        //     RIGHT_SHIFT2.write(90);
-
-        //   }
-          
-        // }
-        // if(PS4.getButtonClick(L1)){
-        //   LEFT_GEAR = !LEFT_GEAR;
-        //   if(LEFT_GEAR){
-        //     //forward
-        //     LEFT_SHIFT1.write(123);
-        //     LEFT_SHIFT2.write(123);
-        //     Serial.print(F("\n shift left 120\n"));
-        //   }else{
-        //     //reverse
-        //     LEFT_SHIFT1.write(50);
-        //     LEFT_SHIFT2.write(50);
-        //     Serial.print(F("\n shift left 90\n"));
-        //   }
-        // }
+      case TANK_MODE:
 
         if(normalizeJoystick(PS4.getAnalogHat(LeftHatY)) > THRESHOLD ){
           Serial.print(F("\n\tLeftHatY: "));
           Serial.print(normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
           double leftThrottleValue = exponential(normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
-          analogWrite(RPWM_1, normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
+          analogWrite(RPWM_1, leftThrottleValue);
 
         } else if (normalizeJoystick(PS4.getAnalogHat(LeftHatY)) < -THRESHOLD) {
           Serial.print(F("\n\tLeftHatY: "));
           Serial.print(normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
           double leftThrottleValue = exponential(normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
-          analogWrite(RPWM_1, normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
+          analogWrite(LPWM_1, leftThrottleValue);
         
         } else {
           analogWrite(LPWM_1, 0);
           analogWrite(RPWM_1, 0);
         }
         
-        // if(normalizeJoystick(PS4.getAnalogHat(RightHatY)) > THRESHOLD || normalizeJoystick(PS4.getAnalogHat(RightHatY)) < -THRESHOLD){
-        //   double rightThrottleValue = exponential(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
-        //   RIGHT_THROTTLE.write(mapToServoRight(rightThrottleValue));
-        //   Serial.print(F("\n\tRightHatY: "));
-        //   Serial.print(exponential(normalizeJoystick(PS4.getAnalogHat(RightHatY))));
-        // }else {
-        //   RIGHT_THROTTLE.write(SERVO_ZERO);
-        // }
+        if(normalizeJoystick(PS4.getAnalogHat(RightHatY)) > THRESHOLD ){
+          Serial.print(F("\n\tRightHatY: "));
+          Serial.print(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
+          double rightThrottleValue = exponential(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
+          analogWrite(LPWM_2, rightThrottleValue);
 
-        // if (PS4.getButtonClick(CROSS)) {
-        //   Serial.print(F("\r\nCross"));
-        //   PS4.setLedFlash(10, 10); // Set it to blink rapidly
-        //   digitalWrite(RELAY_RIGHT, LOW);
-        //   digitalWrite(RELAY_LEFT, LOW);
-        // }
+        } else if (normalizeJoystick(PS4.getAnalogHat(RightHatY)) < -THRESHOLD) {
+          Serial.print(F("\n\tRightHatY: "));
+          Serial.print(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
+          double rightThrottleValue = exponential(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
+          analogWrite(RPWM_2, rightThrottleValue);
+        
+        } else {
+          analogWrite(LPWM_2, 0);
+          analogWrite(RPWM_2, 0);
+        }
+
         
         break;
-      // case TANK_MODE_AUTO:
-      // case GAME_MODE:
     }
 
     
     
   }else{
     PS4.setLedFlash(10, 10); // Set it to blink rapidly
-    killMotors();
+    killMotors(); //stop the robot from moving
   }
-  //   if (PS4.getAnalogButton(L2) || PS4.getAnalogButton(R2)) { // These are the only analog buttons on the PS4 controller
-  //     Serial.print(F("\r\nL2: "));
-  //     Serial.print(PS4.getAnalogButton(L2));
-  //     Serial.print(F("\tR2: "));
-  //     Serial.print(PS4.getAnalogButton(R2));
-  //   }
+
   //   if (PS4.getAnalogButton(L2) != oldL2Value || PS4.getAnalogButton(R2) != oldR2Value) // Only write value if it's different
   //     PS4.setRumbleOn(PS4.getAnalogButton(L2), PS4.getAnalogButton(R2));
   //   oldL2Value = PS4.getAnalogButton(L2);
