@@ -13,13 +13,17 @@ const int BEGINNER = 1;
 const int TANK_MODE = 2;
 const int GAME_MODE = 3;
 const int RESET_MODE = 0;
-int MAX_POWER = 100;
+int DEFAULT_POWER = 50;
+int MAX_POWER = DEFAULT_POWER;
 int CURRENT_MODE = 0;
 
 // control constants
 int THRESHOLD = 8;
+int SYNC_THRESHHOLD = 20;
 bool LEFT_GEAR = true;
 bool RIGHT_GEAR = true;
+int DECELERATION_DELAY = 2;
+int DECELERATION_FACTOR = 0.8;
 
 // motor controller pins:
 
@@ -111,20 +115,56 @@ void setMaxPower(double touchPadValue){
   
   //Define power levels:
   if(touchPadValue < 400){
-    power_level = 100;
+    power_level = DEFAULT_POWER;
   }else if(touchPadValue >= 400 && touchPadValue < 800){
-    power_level = 130;
-  }else if(touchPadValue >= 800 && touchPadValue < 1200){
-    power_level = 170;
-  }else if(touchPadValue >= 1200 && touchPadValue < 1600){
-    power_level = 215;
-  }else if(touchPadValue >= 1600){
-    power_level = 255;
-  }else{
     power_level = 100;
+  }else if(touchPadValue >= 800 && touchPadValue < 1200){
+    power_level = 130;
+  }else if(touchPadValue >= 1200 && touchPadValue < 1600){
+    power_level = 170;
+  }else if(touchPadValue >= 1600){
+    power_level = 210;
+  }else{
+    power_level = DEFAULT_POWER;
   }
 
   MAX_POWER = power_level;
+}
+
+//checks if the motors should be synced
+bool inSyncRange(int leftMotor, int rightMotor){
+  return abs(abs(leftMotor)-abs(rightMotor)) < SYNC_THRESHHOLD;
+}
+
+//syncs the speeds of the left and right motors
+void sync(int speed, int direction){
+  double throttleValue = exponential(speed);
+  if(direction == 1){
+    analogWrite(RPWM_1, throttleValue);
+    analogWrite(LPWM_2, throttleValue);    
+  }else if(direction == -1){
+    analogWrite(RPWM_2, throttleValue);
+    analogWrite(LPWM_1, throttleValue);    
+  }
+
+}
+
+int decelerationStep(int currentSpeed){
+  return currentSpeed*DECELERATION_FACTOR;
+}
+
+//delelarator to prevent harsh stopping (not done yet, currently broken)
+void decelerateMotor(int motorPin, double currentSpeed) {
+  Serial.println(currentSpeed);
+  while (currentSpeed > 0) {
+      currentSpeed -= decelerationStep(currentSpeed); // DECELERATION_STEP is the decrement step for the speed
+      if (currentSpeed < 0) {
+          currentSpeed = 0; // Ensure speed doesn't go below 0
+      }
+      analogWrite(motorPin, currentSpeed);
+      delay(DECELERATION_DELAY); // DECELERATION_DELAY is the time between each decrement step
+  }
+  analogWrite(motorPin, 0);
 }
 
 void loop() {
@@ -149,7 +189,7 @@ void loop() {
     if(PS4.getButtonClick(DOWN)) {
       Serial.print("\n Resetting");
       CURRENT_MODE = RESET_MODE;     
-      MAX_POWER = 100;
+      MAX_POWER = DEFAULT_POWER;
       PS4.setLed(Blue);
       killMotors();
     }
@@ -167,49 +207,59 @@ void loop() {
       }
     }
 
+    
+
     switch(CURRENT_MODE) {
       case TANK_MODE:
 
-        if(normalizeJoystick(PS4.getAnalogHat(LeftHatY)) > THRESHOLD ){
-          Serial.print(F("\n\tLeftHatY: "));
-          Serial.print(normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
+        if(normalizeJoystick(PS4.getAnalogHat(LeftHatY)) > THRESHOLD && normalizeJoystick(PS4.getAnalogHat(RightHatY)) > THRESHOLD && inSyncRange(normalizeJoystick(PS4.getAnalogHat(LeftHatY)), normalizeJoystick(PS4.getAnalogHat(RightHatY)))){
+          sync(normalizeJoystick(PS4.getAnalogHat(LeftHatY)), 1); //forward
+        }else if(normalizeJoystick(PS4.getAnalogHat(LeftHatY)) < -THRESHOLD && normalizeJoystick(PS4.getAnalogHat(RightHatY)) < -THRESHOLD && inSyncRange(normalizeJoystick(PS4.getAnalogHat(LeftHatY)), normalizeJoystick(PS4.getAnalogHat(RightHatY)))){
+          sync(normalizeJoystick(PS4.getAnalogHat(LeftHatY)), -1); //backward
+        }else{
           double leftThrottleValue = exponential(normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
-          analogWrite(RPWM_1, leftThrottleValue);
+          if(normalizeJoystick(PS4.getAnalogHat(LeftHatY)) > THRESHOLD ){
+            Serial.print(F("\n\tLeftHatY: "));
+            Serial.print(normalizeJoystick(PS4.getAnalogHat(LeftHatY+10))); //even out the controls no sure why forward left needs more power.
+            analogWrite(RPWM_1, leftThrottleValue);
 
-        } else if (normalizeJoystick(PS4.getAnalogHat(LeftHatY)) < -THRESHOLD) {
-          Serial.print(F("\n\tLeftHatY: "));
-          Serial.print(normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
-          double leftThrottleValue = exponential(normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
-          analogWrite(LPWM_1, leftThrottleValue);
-        
-        } else {
-          analogWrite(LPWM_1, 0);
-          analogWrite(RPWM_1, 0);
-        }
-        
-        if(normalizeJoystick(PS4.getAnalogHat(RightHatY)) > THRESHOLD ){
-          Serial.print(F("\n\tRightHatY: "));
-          Serial.print(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
+          } else if (normalizeJoystick(PS4.getAnalogHat(LeftHatY)) < -THRESHOLD) {
+            Serial.print(F("\n\tLeftHatY: "));
+            Serial.print(normalizeJoystick(PS4.getAnalogHat(LeftHatY)));
+            analogWrite(LPWM_1, leftThrottleValue);
+          
+          } else {
+            // decelerateMotor(LPWM_1, leftThrottleValue);
+            // decelerateMotor(RPWM_1, leftThrottleValue);
+            analogWrite(LPWM_1, 0);
+            analogWrite(RPWM_1, 0);
+          }
+          
           double rightThrottleValue = exponential(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
-          analogWrite(LPWM_2, rightThrottleValue);
+          if(normalizeJoystick(PS4.getAnalogHat(RightHatY)) > THRESHOLD ){
+            Serial.print(F("\n\tRightHatY: "));
+            Serial.print(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
+            analogWrite(LPWM_2, rightThrottleValue);
 
-        } else if (normalizeJoystick(PS4.getAnalogHat(RightHatY)) < -THRESHOLD) {
-          Serial.print(F("\n\tRightHatY: "));
-          Serial.print(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
-          double rightThrottleValue = exponential(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
-          analogWrite(RPWM_2, rightThrottleValue);
-        
-        } else {
-          analogWrite(LPWM_2, 0);
-          analogWrite(RPWM_2, 0);
+          } else if (normalizeJoystick(PS4.getAnalogHat(RightHatY)) < -THRESHOLD) {
+            Serial.print(F("\n\tRightHatY: "));
+            Serial.print(normalizeJoystick(PS4.getAnalogHat(RightHatY)));
+            analogWrite(RPWM_2, rightThrottleValue);
+          
+          } else {
+            // decelerateMotor(LPWM_2, rightThrottleValue);
+            // decelerateMotor(RPWM_2, rightThrottleValue);
+            analogWrite(LPWM_2, 0);
+            analogWrite(RPWM_2, 0);
+          }
         }
 
-        
         break;
+
     }
 
     
-    
+  
   }else{
     PS4.setLedFlash(10, 10); // Set it to blink rapidly
     killMotors(); //stop the robot from moving
